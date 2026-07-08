@@ -35,3 +35,27 @@ The Vite dev server proxies `/api` to `http://localhost:4000`, so just open `htt
 The first person to sign up should use "Create household" — this returns an invite code to share with their partner, who signs up with "Join with code".
 
 Data is stored in `server/data.sqlite` (created automatically, gitignored).
+
+## Hosting it so you can both use it from a browser
+
+In production the backend serves the built frontend itself (`server/src/index.js` serves `client/dist` and falls back to `index.html` for client-side routes), so the whole app is one deployable service — one URL, no separate frontend host, no CORS to configure. A root `Dockerfile` builds the client and runs the server.
+
+SQLite needs a **persistent disk** — most free container platforms wipe the filesystem on redeploy/restart, which would delete your data. Set `DB_PATH` to a path on a mounted volume.
+
+### Recommended: Railway (free tier, ~5 minutes)
+
+1. Push this repo to GitHub (already done if you're reading this from the repo).
+2. On [railway.app](https://railway.app), "New Project" → "Deploy from GitHub repo" → pick this repo. Railway detects the `Dockerfile` automatically.
+3. Add a **Volume**: Settings → Volumes → mount at `/data`.
+4. Set environment variables under Settings → Variables:
+   - `JWT_SECRET` — any long random string (auth tokens are signed with this)
+   - `DB_PATH` — `/data/data.sqlite`
+5. Settings → Networking → "Generate Domain" gives you a public `https://your-app.up.railway.app` URL. Open it in a browser — that's the app for both of you.
+
+### Alternatives
+
+- **Fly.io** — same Dockerfile works; create a volume with `fly volumes create data --size 1` and mount it at `/data` in `fly.toml`, set `JWT_SECRET`/`DB_PATH` as secrets.
+- **Render** — Web Service from the Dockerfile; persistent disks are a paid add-on on Render, so this is the priciest of the three for keeping data.
+- **A small VPS** (DigitalOcean, Hetzner, etc.) — most control, but you're responsible for HTTPS (e.g. via Caddy/Let's Encrypt) and updates. Overkill unless you already run one.
+
+Whichever you pick, always set a real `JWT_SECRET` in production — the default in the code is only for local dev.
