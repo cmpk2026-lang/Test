@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import 'dotenv/config';
 
+import { initSchema } from './db.js';
 import authRoutes from './routes/auth.js';
 import categoryRoutes from './routes/categories.js';
 import budgetRoutes from './routes/budgets.js';
@@ -44,6 +45,13 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
-});
+initSchema()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server listening on http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to initialize database schema:', err);
+    process.exit(1);
+  });

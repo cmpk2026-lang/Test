@@ -1,110 +1,109 @@
-import Database from 'better-sqlite3';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import pg from 'pg';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'data.sqlite');
+const { Pool } = pg;
 
-export const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL || 'postgres://budget_app:budget_app_dev@localhost:5432/budget',
+});
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS households (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  invite_code TEXT NOT NULL UNIQUE,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+export async function initSchema() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS households (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      invite_code TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  email TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  color TEXT NOT NULL DEFAULT '#6366f1',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#6366f1',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-CREATE TABLE IF NOT EXISTS categories (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  icon TEXT NOT NULL DEFAULT '💰',
-  color TEXT NOT NULL DEFAULT '#6366f1',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+    CREATE TABLE IF NOT EXISTS categories (
+      id SERIAL PRIMARY KEY,
+      household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      icon TEXT NOT NULL DEFAULT '💰',
+      color TEXT NOT NULL DEFAULT '#6366f1',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-CREATE TABLE IF NOT EXISTS budgets (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
-  category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
-  month TEXT NOT NULL,
-  amount REAL NOT NULL,
-  UNIQUE(category_id, month)
-);
+    CREATE TABLE IF NOT EXISTS budgets (
+      id SERIAL PRIMARY KEY,
+      household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+      category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+      month TEXT NOT NULL,
+      amount DOUBLE PRECISION NOT NULL,
+      UNIQUE(category_id, month)
+    );
 
-CREATE TABLE IF NOT EXISTS expenses (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
-  category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
-  payer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  amount REAL NOT NULL,
-  description TEXT NOT NULL DEFAULT '',
-  date TEXT NOT NULL,
-  split_type TEXT NOT NULL DEFAULT 'equal',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+    CREATE TABLE IF NOT EXISTS expenses (
+      id SERIAL PRIMARY KEY,
+      household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+      category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+      payer_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount DOUBLE PRECISION NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      date TEXT NOT NULL,
+      split_type TEXT NOT NULL DEFAULT 'equal',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-CREATE TABLE IF NOT EXISTS expense_splits (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  expense_id INTEGER NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  share_amount REAL NOT NULL
-);
+    CREATE TABLE IF NOT EXISTS expense_splits (
+      id SERIAL PRIMARY KEY,
+      expense_id INTEGER NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      share_amount DOUBLE PRECISION NOT NULL
+    );
 
-CREATE TABLE IF NOT EXISTS recurring_bills (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
-  category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
-  name TEXT NOT NULL,
-  amount REAL NOT NULL,
-  due_day INTEGER NOT NULL DEFAULT 1,
-  split_type TEXT NOT NULL DEFAULT 'equal',
-  active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+    CREATE TABLE IF NOT EXISTS recurring_bills (
+      id SERIAL PRIMARY KEY,
+      household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+      category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+      name TEXT NOT NULL,
+      amount DOUBLE PRECISION NOT NULL,
+      due_day INTEGER NOT NULL DEFAULT 1,
+      split_type TEXT NOT NULL DEFAULT 'equal',
+      active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-CREATE TABLE IF NOT EXISTS recurring_bill_payments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  recurring_bill_id INTEGER NOT NULL REFERENCES recurring_bills(id) ON DELETE CASCADE,
-  month TEXT NOT NULL,
-  paid_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  paid_date TEXT NOT NULL,
-  amount REAL NOT NULL,
-  UNIQUE(recurring_bill_id, month)
-);
+    CREATE TABLE IF NOT EXISTS recurring_bill_payments (
+      id SERIAL PRIMARY KEY,
+      recurring_bill_id INTEGER NOT NULL REFERENCES recurring_bills(id) ON DELETE CASCADE,
+      month TEXT NOT NULL,
+      paid_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      paid_date TEXT NOT NULL,
+      amount DOUBLE PRECISION NOT NULL,
+      UNIQUE(recurring_bill_id, month)
+    );
 
-CREATE TABLE IF NOT EXISTS savings_goals (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  target_amount REAL NOT NULL,
-  target_date TEXT,
-  icon TEXT NOT NULL DEFAULT '🎯',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+    CREATE TABLE IF NOT EXISTS savings_goals (
+      id SERIAL PRIMARY KEY,
+      household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      target_amount DOUBLE PRECISION NOT NULL,
+      target_date TEXT,
+      icon TEXT NOT NULL DEFAULT '🎯',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-CREATE TABLE IF NOT EXISTS savings_contributions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  goal_id INTEGER NOT NULL REFERENCES savings_goals(id) ON DELETE CASCADE,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  amount REAL NOT NULL,
-  date TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-`);
+    CREATE TABLE IF NOT EXISTS savings_contributions (
+      id SERIAL PRIMARY KEY,
+      goal_id INTEGER NOT NULL REFERENCES savings_goals(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount DOUBLE PRECISION NOT NULL,
+      date TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+}
 
 const DEFAULT_CATEGORIES = [
   { name: 'Groceries', icon: '🛒', color: '#22c55e' },
@@ -119,12 +118,16 @@ const DEFAULT_CATEGORIES = [
   { name: 'Other', icon: '💰', color: '#64748b' },
 ];
 
-export function seedDefaultCategories(householdId) {
-  const insert = db.prepare(
-    'INSERT INTO categories (household_id, name, icon, color) VALUES (?, ?, ?, ?)'
-  );
-  const insertMany = db.transaction((cats) => {
-    for (const c of cats) insert.run(householdId, c.name, c.icon, c.color);
+export async function seedDefaultCategories(client, householdId) {
+  const values = [];
+  const params = [];
+  DEFAULT_CATEGORIES.forEach((c, i) => {
+    const base = i * 4;
+    values.push(`($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`);
+    params.push(householdId, c.name, c.icon, c.color);
   });
-  insertMany(DEFAULT_CATEGORIES);
+  await client.query(
+    `INSERT INTO categories (household_id, name, icon, color) VALUES ${values.join(', ')}`,
+    params
+  );
 }

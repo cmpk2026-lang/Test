@@ -1,12 +1,13 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
 
 const router = Router();
 router.use(requireAuth);
 
-function getMembers(householdId) {
-  return db.prepare('SELECT id FROM users WHERE household_id = ?').all(householdId).map((u) => u.id);
+async function getMembers(householdId) {
+  const result = await pool.query('SELECT id FROM users WHERE household_id = $1', [householdId]);
+  return result.rows.map((u) => u.id);
 }
 
 function computeSplits({ splitType, amount, payerId, members, customSplits }) {
@@ -32,10 +33,11 @@ function computeSplits({ splitType, amount, payerId, members, customSplits }) {
   return splits;
 }
 
-function serializeExpense(expense) {
-  const splits = db
-    .prepare('SELECT user_id AS userId, share_amount AS shareAmount FROM expense_splits WHERE expense_id = ?')
-    .all(expense.id);
+async function serializeExpense(expense) {
+  const splitsResult = await pool.query(
+    'SELECT user_id AS "userId", share_amount AS "shareAmount" FROM expense_splits WHERE expense_id = $1',
+    [expense.id]
+  );
   return {
     id: expense.id,
     categoryId: expense.category_id,
@@ -45,28 +47,28 @@ function serializeExpense(expense) {
     date: expense.date,
     splitType: expense.split_type,
     createdAt: expense.created_at,
-    splits,
+    splits: splitsResult.rows,
   };
 }
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const { month, categoryId } = req.query;
-  let sql = 'SELECT * FROM expenses WHERE household_id = ?';
+  let sql = 'SELECT * FROM expenses WHERE household_id = $1';
   const params = [req.householdId];
   if (month) {
-    sql += " AND substr(date, 1, 7) = ?";
     params.push(month);
+    sql += ` AND substr(date, 1, 7) = $${params.length}`;
   }
   if (categoryId) {
-    sql += ' AND category_id = ?';
     params.push(categoryId);
+    sql += ` AND category_id = $${params.length}`;
   }
   sql += ' ORDER BY date DESC, id DESC';
-  const expenses = db.prepare(sql).all(...params);
-  res.json(expenses.map(serializeExpense));
+  const result = await pool.query(sql, params);
+  res.json(await Promise.all(result.rows.map(serializeExpense)));
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { categoryId, payerId, amount, description, date, splitType, splits: customSplits } = req.body || {};
   if (!payerId || !amount || !date) {
     return res.status(400).json({ error: 'payerId, amount, and date are required' });
@@ -74,7 +76,7 @@ router.post('/', (req, res) => {
   const amt = Number(amount);
   if (!(amt > 0)) return res.status(400).json({ error: 'amount must be a positive number' });
 
-  const members = getMembers(req.householdId);
+  const members = await getMembers(req.householdId);
   if (!members.includes(Number(payerId))) {
     return res.status(400).json({ error: 'payerId must be a member of your household' });
   }
@@ -92,36 +94,47 @@ router.post('/', (req, res) => {
     return res.status(400).json({ error: err.message });
   }
 
-  const result = db.transaction(() => {
-    const expense = db
-      .prepare(
-        `INSERT INTO expenses (household_id, category_id, payer_id, amount, description, date, split_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(req.householdId, categoryId || null, payerId, amt, description || '', date, splitType || 'equal');
-    const expenseId = expense.lastInsertRowid;
-    const insertSplit = db.prepare(
-      'INSERT INTO expense_splits (expense_id, user_id, share_amount) VALUES (?, ?, ?)'
+  const client = await pool.connect();
+  let expenseId;
+  try {
+    await client.query('BEGIN');
+    const expenseResult = await client.query(
+      `INSERT INTO expenses (household_id, category_id, payer_id, amount, description, date, split_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [req.householdId, categoryId || null, payerId, amt, description || '', date, splitType || 'equal']
     );
-    for (const s of splits) insertSplit.run(expenseId, s.userId, s.shareAmount);
-    return expenseId;
-  })();
+    expenseId = expenseResult.rows[0].id;
+    for (const s of splits) {
+      await client.query(
+        'INSERT INTO expense_splits (expense_id, user_id, share_amount) VALUES ($1, $2, $3)',
+        [expenseId, s.userId, s.shareAmount]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 
-  const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(result);
-  res.status(201).json(serializeExpense(expense));
+  const expenseResult = await pool.query('SELECT * FROM expenses WHERE id = $1', [expenseId]);
+  res.status(201).json(await serializeExpense(expenseResult.rows[0]));
 });
 
-router.put('/:id', (req, res) => {
-  const existing = db
-    .prepare('SELECT * FROM expenses WHERE id = ? AND household_id = ?')
-    .get(req.params.id, req.householdId);
+router.put('/:id', async (req, res) => {
+  const existingResult = await pool.query('SELECT * FROM expenses WHERE id = $1 AND household_id = $2', [
+    req.params.id,
+    req.householdId,
+  ]);
+  const existing = existingResult.rows[0];
   if (!existing) return res.status(404).json({ error: 'Expense not found' });
 
   const { categoryId, payerId, amount, description, date, splitType, splits: customSplits } = req.body || {};
   const amt = amount !== undefined ? Number(amount) : existing.amount;
   const payer = payerId !== undefined ? Number(payerId) : existing.payer_id;
   const type = splitType || existing.split_type;
-  const members = getMembers(req.householdId);
+  const members = await getMembers(req.householdId);
   if (!members.includes(payer)) {
     return res.status(400).json({ error: 'payerId must be a member of your household' });
   }
@@ -133,36 +146,47 @@ router.put('/:id', (req, res) => {
     return res.status(400).json({ error: err.message });
   }
 
-  db.transaction(() => {
-    db.prepare(
-      `UPDATE expenses SET category_id = ?, payer_id = ?, amount = ?, description = ?, date = ?, split_type = ?
-       WHERE id = ?`
-    ).run(
-      categoryId !== undefined ? categoryId : existing.category_id,
-      payer,
-      amt,
-      description !== undefined ? description : existing.description,
-      date || existing.date,
-      type,
-      existing.id
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE expenses SET category_id = $1, payer_id = $2, amount = $3, description = $4, date = $5, split_type = $6
+       WHERE id = $7`,
+      [
+        categoryId !== undefined ? categoryId : existing.category_id,
+        payer,
+        amt,
+        description !== undefined ? description : existing.description,
+        date || existing.date,
+        type,
+        existing.id,
+      ]
     );
-    db.prepare('DELETE FROM expense_splits WHERE expense_id = ?').run(existing.id);
-    const insertSplit = db.prepare(
-      'INSERT INTO expense_splits (expense_id, user_id, share_amount) VALUES (?, ?, ?)'
-    );
-    for (const s of splits) insertSplit.run(existing.id, s.userId, s.shareAmount);
-  })();
+    await client.query('DELETE FROM expense_splits WHERE expense_id = $1', [existing.id]);
+    for (const s of splits) {
+      await client.query(
+        'INSERT INTO expense_splits (expense_id, user_id, share_amount) VALUES ($1, $2, $3)',
+        [existing.id, s.userId, s.shareAmount]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 
-  const expense = db.prepare('SELECT * FROM expenses WHERE id = ?').get(existing.id);
-  res.json(serializeExpense(expense));
+  const expenseResult = await pool.query('SELECT * FROM expenses WHERE id = $1', [existing.id]);
+  res.json(await serializeExpense(expenseResult.rows[0]));
 });
 
-router.delete('/:id', (req, res) => {
-  const existing = db
-    .prepare('SELECT * FROM expenses WHERE id = ? AND household_id = ?')
-    .get(req.params.id, req.householdId);
-  if (!existing) return res.status(404).json({ error: 'Expense not found' });
-  db.prepare('DELETE FROM expenses WHERE id = ?').run(existing.id);
+router.delete('/:id', async (req, res) => {
+  const result = await pool.query('DELETE FROM expenses WHERE id = $1 AND household_id = $2 RETURNING id', [
+    req.params.id,
+    req.householdId,
+  ]);
+  if (result.rowCount === 0) return res.status(404).json({ error: 'Expense not found' });
   res.status(204).end();
 });
 

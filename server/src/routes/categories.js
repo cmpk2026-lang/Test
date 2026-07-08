@@ -1,33 +1,33 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
 
 const router = Router();
 router.use(requireAuth);
 
-router.get('/', (req, res) => {
-  const categories = db
-    .prepare('SELECT * FROM categories WHERE household_id = ? ORDER BY name')
-    .all(req.householdId);
-  res.json(categories);
+router.get('/', async (req, res) => {
+  const result = await pool.query('SELECT * FROM categories WHERE household_id = $1 ORDER BY name', [
+    req.householdId,
+  ]);
+  res.json(result.rows);
 });
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { name, icon, color } = req.body || {};
   if (!name) return res.status(400).json({ error: 'name is required' });
-  const result = db
-    .prepare('INSERT INTO categories (household_id, name, icon, color) VALUES (?, ?, ?, ?)')
-    .run(req.householdId, name, icon || '💰', color || '#6366f1');
-  const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(category);
+  const result = await pool.query(
+    'INSERT INTO categories (household_id, name, icon, color) VALUES ($1, $2, $3, $4) RETURNING *',
+    [req.householdId, name, icon || '💰', color || '#6366f1']
+  );
+  res.status(201).json(result.rows[0]);
 });
 
-router.delete('/:id', (req, res) => {
-  const category = db
-    .prepare('SELECT * FROM categories WHERE id = ? AND household_id = ?')
-    .get(req.params.id, req.householdId);
-  if (!category) return res.status(404).json({ error: 'Category not found' });
-  db.prepare('DELETE FROM categories WHERE id = ?').run(category.id);
+router.delete('/:id', async (req, res) => {
+  const result = await pool.query('DELETE FROM categories WHERE id = $1 AND household_id = $2 RETURNING id', [
+    req.params.id,
+    req.householdId,
+  ]);
+  if (result.rowCount === 0) return res.status(404).json({ error: 'Category not found' });
   res.status(204).end();
 });
 

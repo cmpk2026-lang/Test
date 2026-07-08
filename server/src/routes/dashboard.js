@@ -1,33 +1,33 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import { pool } from '../db.js';
 import { requireAuth } from '../auth.js';
 
 const router = Router();
 router.use(requireAuth);
 
-function computeBalance(householdId) {
-  const members = db
-    .prepare('SELECT id, name, color FROM users WHERE household_id = ? ORDER BY id')
-    .all(householdId);
+async function computeBalance(householdId) {
+  const membersResult = await pool.query(
+    'SELECT id, name, color FROM users WHERE household_id = $1 ORDER BY id',
+    [householdId]
+  );
+  const members = membersResult.rows;
 
-  const paid = db
-    .prepare(
-      `SELECT payer_id AS userId, COALESCE(SUM(amount), 0) AS total
-       FROM expenses WHERE household_id = ? GROUP BY payer_id`
-    )
-    .all(householdId);
-  const owed = db
-    .prepare(
-      `SELECT es.user_id AS userId, COALESCE(SUM(es.share_amount), 0) AS total
-       FROM expense_splits es
-       JOIN expenses e ON e.id = es.expense_id
-       WHERE e.household_id = ?
-       GROUP BY es.user_id`
-    )
-    .all(householdId);
+  const paidResult = await pool.query(
+    `SELECT payer_id AS "userId", COALESCE(SUM(amount), 0) AS total
+     FROM expenses WHERE household_id = $1 GROUP BY payer_id`,
+    [householdId]
+  );
+  const owedResult = await pool.query(
+    `SELECT es.user_id AS "userId", COALESCE(SUM(es.share_amount), 0) AS total
+     FROM expense_splits es
+     JOIN expenses e ON e.id = es.expense_id
+     WHERE e.household_id = $1
+     GROUP BY es.user_id`,
+    [householdId]
+  );
 
-  const paidMap = Object.fromEntries(paid.map((p) => [p.userId, p.total]));
-  const owedMap = Object.fromEntries(owed.map((o) => [o.userId, o.total]));
+  const paidMap = Object.fromEntries(paidResult.rows.map((p) => [p.userId, Number(p.total)]));
+  const owedMap = Object.fromEntries(owedResult.rows.map((o) => [o.userId, Number(o.total)]));
 
   const net = members.map((m) => ({
     userId: m.id,
@@ -53,75 +53,84 @@ function computeBalance(householdId) {
   return { members: net, settlement: summary };
 }
 
-router.get('/balance', (req, res) => {
-  res.json(computeBalance(req.householdId));
+router.get('/balance', async (req, res) => {
+  res.json(await computeBalance(req.householdId));
 });
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
 
-  const spendByCategory = db
-    .prepare(
-      `SELECT c.id AS categoryId, c.name, c.icon, c.color,
-              COALESCE(SUM(e.amount), 0) AS spent,
-              COALESCE((SELECT amount FROM budgets b WHERE b.category_id = c.id AND b.month = ?), 0) AS budget
-       FROM categories c
-       LEFT JOIN expenses e ON e.category_id = c.id AND substr(e.date, 1, 7) = ? AND e.household_id = ?
-       WHERE c.household_id = ?
-       GROUP BY c.id
-       ORDER BY spent DESC`
-    )
-    .all(month, month, req.householdId, req.householdId);
+  const spendByCategoryResult = await pool.query(
+    `SELECT c.id AS "categoryId", c.name, c.icon, c.color,
+            COALESCE(SUM(e.amount), 0) AS spent,
+            COALESCE((SELECT amount FROM budgets b WHERE b.category_id = c.id AND b.month = $1), 0) AS budget
+     FROM categories c
+     LEFT JOIN expenses e ON e.category_id = c.id AND substr(e.date, 1, 7) = $1 AND e.household_id = $2
+     WHERE c.household_id = $2
+     GROUP BY c.id
+     ORDER BY spent DESC`,
+    [month, req.householdId]
+  );
+  const spendByCategory = spendByCategoryResult.rows.map((c) => ({
+    ...c,
+    spent: Number(c.spent),
+    budget: Number(c.budget),
+  }));
 
   const totalSpent = spendByCategory.reduce((s, c) => s + c.spent, 0);
   const totalBudget = spendByCategory.reduce((s, c) => s + c.budget, 0);
 
-  const recentExpenses = db
-    .prepare(
-      `SELECT e.id, e.amount, e.description, e.date, e.payer_id AS payerId,
-              c.name AS categoryName, c.icon AS categoryIcon
-       FROM expenses e
-       LEFT JOIN categories c ON c.id = e.category_id
-       WHERE e.household_id = ?
-       ORDER BY e.date DESC, e.id DESC
-       LIMIT 8`
-    )
-    .all(req.householdId);
+  const recentExpensesResult = await pool.query(
+    `SELECT e.id, e.amount, e.description, e.date, e.payer_id AS "payerId",
+            c.name AS "categoryName", c.icon AS "categoryIcon"
+     FROM expenses e
+     LEFT JOIN categories c ON c.id = e.category_id
+     WHERE e.household_id = $1
+     ORDER BY e.date DESC, e.id DESC
+     LIMIT 8`,
+    [req.householdId]
+  );
 
-  const upcomingBills = db
-    .prepare(
-      `SELECT rb.id, rb.name, rb.amount, rb.due_day AS dueDay,
-              (SELECT COUNT(*) FROM recurring_bill_payments p WHERE p.recurring_bill_id = rb.id AND p.month = ?) AS paidCount
-       FROM recurring_bills rb
-       WHERE rb.household_id = ? AND rb.active = 1
-       ORDER BY rb.due_day`
-    )
-    .all(month, req.householdId)
-    .map((b) => ({ ...b, paid: b.paidCount > 0 }));
+  const upcomingBillsResult = await pool.query(
+    `SELECT rb.id, rb.name, rb.amount, rb.due_day AS "dueDay",
+            (SELECT COUNT(*) FROM recurring_bill_payments p WHERE p.recurring_bill_id = rb.id AND p.month = $1) AS "paidCount"
+     FROM recurring_bills rb
+     WHERE rb.household_id = $2 AND rb.active = true
+     ORDER BY rb.due_day`,
+    [month, req.householdId]
+  );
+  const upcomingBills = upcomingBillsResult.rows.map((b) => ({
+    ...b,
+    paid: Number(b.paidCount) > 0,
+  }));
 
-  const goals = db
-    .prepare('SELECT * FROM savings_goals WHERE household_id = ? ORDER BY created_at')
-    .all(req.householdId)
-    .map((g) => {
-      const current = db
-        .prepare('SELECT COALESCE(SUM(amount), 0) AS total FROM savings_contributions WHERE goal_id = ?')
-        .get(g.id).total;
+  const goalsResult = await pool.query(
+    'SELECT * FROM savings_goals WHERE household_id = $1 ORDER BY created_at',
+    [req.householdId]
+  );
+  const goals = await Promise.all(
+    goalsResult.rows.map(async (g) => {
+      const currentResult = await pool.query(
+        'SELECT COALESCE(SUM(amount), 0) AS total FROM savings_contributions WHERE goal_id = $1',
+        [g.id]
+      );
       return {
         id: g.id,
         name: g.name,
         icon: g.icon,
         targetAmount: g.target_amount,
-        currentAmount: Math.round(current * 100) / 100,
+        currentAmount: Math.round(Number(currentResult.rows[0].total) * 100) / 100,
       };
-    });
+    })
+  );
 
   res.json({
     month,
     totalSpent: Math.round(totalSpent * 100) / 100,
     totalBudget: Math.round(totalBudget * 100) / 100,
     spendByCategory,
-    recentExpenses,
-    balance: computeBalance(req.householdId),
+    recentExpenses: recentExpensesResult.rows,
+    balance: await computeBalance(req.householdId),
     upcomingBills,
     goals,
   });
