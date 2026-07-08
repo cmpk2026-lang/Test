@@ -11,7 +11,6 @@ export async function initSchema() {
     CREATE TABLE IF NOT EXISTS households (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
-      invite_code TEXT NOT NULL UNIQUE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
@@ -19,10 +18,9 @@ export async function initSchema() {
       id SERIAL PRIMARY KEY,
       household_id INTEGER NOT NULL REFERENCES households(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
-      email TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
       color TEXT NOT NULL DEFAULT '#6366f1',
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(household_id, name)
     );
 
     CREATE TABLE IF NOT EXISTS categories (
@@ -103,6 +101,30 @@ export async function initSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+}
+
+// This app is single-tenant in practice (one shared access code, one
+// household for the two of you), so there's always exactly one row here —
+// created lazily on first use rather than through any signup flow.
+export async function getOrCreateHousehold() {
+  const existing = await pool.query('SELECT * FROM households ORDER BY id LIMIT 1');
+  if (existing.rows[0]) return existing.rows[0];
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      "INSERT INTO households (name) VALUES ('Our Household') RETURNING *"
+    );
+    await seedDefaultCategories(client, result.rows[0].id);
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 const DEFAULT_CATEGORIES = [

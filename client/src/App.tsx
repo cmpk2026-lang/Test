@@ -2,8 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { MonthProvider } from './context/MonthContext';
 import { Layout } from './components/Layout';
-import { LoginPage } from './pages/LoginPage';
-import { RegisterPage } from './pages/RegisterPage';
+import { EnterPage } from './pages/EnterPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ExpensesPage } from './pages/ExpensesPage';
 import { BudgetsPage } from './pages/BudgetsPage';
@@ -19,7 +18,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/enter" replace />;
   return <>{children}</>;
 }
 
@@ -28,12 +27,8 @@ function AppRoutes() {
   return (
     <Routes>
       <Route
-        path="/login"
-        element={!loading && user ? <Navigate to="/" replace /> : <LoginPage />}
-      />
-      <Route
-        path="/register"
-        element={!loading && user ? <Navigate to="/" replace /> : <RegisterPage />}
+        path="/enter"
+        element={!loading && user ? <Navigate to="/" replace /> : <EnterPage />}
       />
       <Route
         element={

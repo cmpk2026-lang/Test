@@ -10,13 +10,18 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+const AUTH_ENDPOINTS = ['/auth/check', '/auth/enter'];
+
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401) {
+    // A 401 from /auth/check or /auth/enter just means "wrong code" — let the
+    // caller show that inline instead of treating it as an expired session.
+    const isAuthAttempt = AUTH_ENDPOINTS.some((p) => err.config?.url?.includes(p));
+    if (err.response?.status === 401 && !isAuthAttempt) {
       localStorage.removeItem('token');
-      if (!location.pathname.startsWith('/login')) {
-        location.href = '/login';
+      if (!location.pathname.startsWith('/enter')) {
+        location.href = '/enter';
       }
     }
     return Promise.reject(err);

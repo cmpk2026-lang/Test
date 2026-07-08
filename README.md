@@ -4,7 +4,7 @@ A small full-stack app for couples to track shared spending and budgets together
 
 ## Features
 
-- **Shared household accounts** — one person creates a household and gets an invite code; the other joins with it. Every expense, budget, bill, and goal is scoped to the household.
+- **One shared access code** — no individual accounts, passwords, or emails. Enter the household's access code once, type your name the first time (or just tap it after that), and you're in. Meant for exactly the two of you.
 - **Expense tracking with splitting** — log who paid, then split the cost equally, with a custom split, or mark it as personal (not shared).
 - **Monthly category budgets** — set a budget per category per month and see spend-vs-budget progress bars.
 - **Balance / who-owes-whom** — the dashboard computes each partner's net position from all expense splits and shows a one-line settlement ("Sam owes Alex $72.25").
@@ -34,7 +34,7 @@ npm run dev
 
 The Vite dev server proxies `/api` to `http://localhost:4000`, so just open `http://localhost:5173`. The server creates all tables automatically on first boot (`CREATE TABLE IF NOT EXISTS`).
 
-The first person to sign up should use "Create household" — this returns an invite code to share with their partner, who signs up with "Join with code".
+The access code defaults to `CMPK` (set `ACCESS_CODE` to change it). Enter it, then type your name — the first name typed becomes the first household member; your partner enters the same code and either taps your name (if they're looking at your screen) or types their own. There's no separate signup step.
 
 ## Hosting it so you can both use it from a browser
 
@@ -50,6 +50,7 @@ Railway's free Trial plan locks the generic "Volumes" feature behind adding a pa
 4. On your app service → **Variables**, add:
    - `JWT_SECRET` — any long random string (auth tokens are signed with this)
    - `DATABASE_URL` — reference the Postgres service's variable (Railway lets you pick `${{Postgres.DATABASE_URL}}` from a dropdown, so it's always in sync)
+   - `ACCESS_CODE` — optional, defaults to `CMPK`; set this to whatever code the two of you want to use
 5. App service → **Settings** → **Networking** → "Generate Domain" gives you a public `https://your-app.up.railway.app` URL. Open it in a browser — that's the app for both of you.
 
 ### Alternatives

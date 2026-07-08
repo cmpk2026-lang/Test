@@ -5,7 +5,6 @@ import type { Household, Member } from '../types';
 interface Me {
   id: number;
   name: string;
-  email: string;
   color: string;
 }
 
@@ -14,9 +13,8 @@ interface AuthContextValue {
   household: Household | null;
   members: Member[];
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string, householdName: string) => Promise<string>;
-  join: (name: string, email: string, password: string, inviteCode: string) => Promise<void>;
+  checkCode: (code: string) => Promise<Member[]>;
+  enter: (code: string, name: string) => Promise<void>;
   logout: () => void;
   refresh: () => Promise<void>;
 }
@@ -56,8 +54,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   // Household membership can change from the partner's device (e.g. they just
-  // joined with an invite code) without any action in this tab, so re-sync
-  // periodically and whenever the tab regains focus rather than only once at login.
+  // entered their name for the first time) without any action in this tab, so
+  // re-sync periodically and whenever the tab regains focus rather than only
+  // once at login.
   useEffect(() => {
     if (!localStorage.getItem('token')) return;
     const onFocus = () => refresh();
@@ -71,43 +70,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [refresh, user]);
 
-  const login = useCallback(
-    async (email: string, password: string) => {
+  const checkCode = useCallback(async (code: string) => {
+    try {
+      const res = await api.post('/auth/check', { code });
+      return res.data.members as Member[];
+    } catch (err) {
+      throw new Error(apiErrorMessage(err, 'Incorrect code'));
+    }
+  }, []);
+
+  const enter = useCallback(
+    async (code: string, name: string) => {
       try {
-        const res = await api.post('/auth/login', { email, password });
+        const res = await api.post('/auth/enter', { code, name });
         localStorage.setItem('token', res.data.token);
         await refresh();
       } catch (err) {
-        throw new Error(apiErrorMessage(err, 'Login failed'));
-      }
-    },
-    [refresh]
-  );
-
-  const register = useCallback(
-    async (name: string, email: string, password: string, householdName: string) => {
-      try {
-        const res = await api.post('/auth/register', { name, email, password, householdName });
-        localStorage.setItem('token', res.data.token);
-        // Note: intentionally not calling refresh() here — RegisterPage shows an
-        // interstitial invite-code screen first, and populating `user` immediately
-        // would trigger the route-level redirect before the user can see it.
-        return res.data.inviteCode as string;
-      } catch (err) {
-        throw new Error(apiErrorMessage(err, 'Registration failed'));
-      }
-    },
-    []
-  );
-
-  const join = useCallback(
-    async (name: string, email: string, password: string, inviteCode: string) => {
-      try {
-        const res = await api.post('/auth/join', { name, email, password, inviteCode });
-        localStorage.setItem('token', res.data.token);
-        await refresh();
-      } catch (err) {
-        throw new Error(apiErrorMessage(err, 'Could not join household'));
+        throw new Error(apiErrorMessage(err, 'Could not continue'));
       }
     },
     [refresh]
@@ -121,7 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, household, members, loading, login, register, join, logout, refresh }}>
+    <AuthContext.Provider value={{ user, household, members, loading, checkCode, enter, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,14 +1,12 @@
 export interface Member {
   id: number;
   name: string;
-  email: string;
   color: string;
 }
 
 export interface Household {
   id: number;
   name: string;
-  inviteCode: string;
 }
 
 export interface Category {
