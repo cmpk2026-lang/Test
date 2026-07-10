@@ -43,11 +43,27 @@ router.post('/enter', async (req, res) => {
       household.id,
     ]);
     const color = MEMBER_COLORS[countResult.rows[0].c % MEMBER_COLORS.length];
-    const inserted = await pool.query(
-      'INSERT INTO users (household_id, name, color) VALUES ($1, $2, $3) RETURNING *',
-      [household.id, trimmedName, color]
-    );
-    user = inserted.rows[0];
+    try {
+      const inserted = await pool.query(
+        'INSERT INTO users (household_id, name, color) VALUES ($1, $2, $3) RETURNING *',
+        [household.id, trimmedName, color]
+      );
+      user = inserted.rows[0];
+    } catch (err) {
+      // Two requests for the same brand-new name can race (e.g. a double-tap
+      // on "Go"): both see no existing user and both try to insert. The
+      // loser hits the (household_id, name) uniqueness constraint — treat
+      // that as a hit rather than an error, since the name now exists either way.
+      if (err.code === '23505') {
+        const retry = await pool.query(
+          'SELECT * FROM users WHERE household_id = $1 AND LOWER(name) = LOWER($2)',
+          [household.id, trimmedName]
+        );
+        user = retry.rows[0];
+      } else {
+        throw err;
+      }
+    }
   }
 
   const token = signToken(user);
