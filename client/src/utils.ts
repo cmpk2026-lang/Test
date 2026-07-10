@@ -1,5 +1,5 @@
 export function formatMoney(amount: number) {
-  return amount.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+  return amount.toLocaleString(undefined, { style: 'currency', currency: 'SGD' });
 }
 
 export function todayISO() {

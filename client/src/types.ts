@@ -90,18 +90,28 @@ export interface Balance {
   settlement: { fromUserId: number | null; toUserId: number | null; amount: number } | null;
 }
 
+export interface CategorySpend {
+  categoryId: number;
+  name: string;
+  icon: string;
+  color: string;
+  spent: number;
+  budget: number;
+}
+
+export interface GoalSummary {
+  id: number;
+  name: string;
+  icon: string;
+  targetAmount: number;
+  currentAmount: number;
+}
+
 export interface DashboardData {
   month: string;
   totalSpent: number;
   totalBudget: number;
-  spendByCategory: Array<{
-    categoryId: number;
-    name: string;
-    icon: string;
-    color: string;
-    spent: number;
-    budget: number;
-  }>;
+  spendByCategory: CategorySpend[];
   recentExpenses: Array<{
     id: number;
     amount: number;
@@ -113,5 +123,15 @@ export interface DashboardData {
   }>;
   balance: Balance;
   upcomingBills: Array<{ id: number; name: string; amount: number; dueDay: number; paid: boolean }>;
-  goals: Array<{ id: number; name: string; icon: string; targetAmount: number; currentAmount: number }>;
+  goals: GoalSummary[];
+}
+
+export interface YearDashboardData {
+  year: string;
+  totalSpent: number;
+  totalBudget: number;
+  spendByCategory: CategorySpend[];
+  monthlyTrend: Array<{ month: string; spent: number }>;
+  balance: Balance;
+  goals: GoalSummary[];
 }
