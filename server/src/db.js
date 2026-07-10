@@ -101,6 +101,28 @@ export async function initSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+
+  // Databases created before the switch to a shared access code (this app's
+  // second iteration) still have the old per-user email/password columns,
+  // NOT NULL, from the original account system. CREATE TABLE IF NOT EXISTS
+  // above is a no-op against an existing table, so those columns — and the
+  // missing (household_id, name) uniqueness — have to be migrated here.
+  await pool.query(`
+    ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
+    ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+    ALTER TABLE households ALTER COLUMN invite_code DROP NOT NULL;
+  `).catch(() => {});
+
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'users_household_id_name_key'
+      ) THEN
+        ALTER TABLE users ADD CONSTRAINT users_household_id_name_key UNIQUE (household_id, name);
+      END IF;
+    END $$;
+  `);
 }
 
 // This app is single-tenant in practice (one shared access code, one
