@@ -107,11 +107,19 @@ export interface GoalSummary {
   currentAmount: number;
 }
 
+export interface PersonSpend {
+  userId: number;
+  name: string;
+  color: string;
+  spent: number;
+}
+
 export interface DashboardData {
   month: string;
   totalSpent: number;
   totalBudget: number;
   spendByCategory: CategorySpend[];
+  spendByPerson: PersonSpend[];
   recentExpenses: Array<{
     id: number;
     amount: number;
@@ -131,6 +139,7 @@ export interface YearDashboardData {
   totalSpent: number;
   totalBudget: number;
   spendByCategory: CategorySpend[];
+  spendByPerson: PersonSpend[];
   monthlyTrend: Array<{ month: string; spent: number }>;
   balance: Balance;
   goals: GoalSummary[];

@@ -53,6 +53,19 @@ async function computeBalance(householdId) {
   return { members: net, settlement: summary };
 }
 
+async function getSpendByPerson(householdId, datePrefixLength, period) {
+  const result = await pool.query(
+    `SELECT u.id AS "userId", u.name, u.color, COALESCE(SUM(e.amount), 0) AS spent
+     FROM users u
+     LEFT JOIN expenses e ON e.payer_id = u.id AND substr(e.date, 1, $1) = $2 AND e.household_id = $3
+     WHERE u.household_id = $3
+     GROUP BY u.id, u.name, u.color
+     ORDER BY u.id`,
+    [datePrefixLength, period, householdId]
+  );
+  return result.rows.map((p) => ({ ...p, spent: Math.round(Number(p.spent) * 100) / 100 }));
+}
+
 async function getGoalsSummary(householdId) {
   const goalsResult = await pool.query(
     'SELECT * FROM savings_goals WHERE household_id = $1 ORDER BY created_at',
@@ -121,6 +134,7 @@ router.get('/year', async (req, res) => {
     totalSpent: Math.round(totalSpent * 100) / 100,
     totalBudget: Math.round(totalBudget * 100) / 100,
     spendByCategory,
+    spendByPerson: await getSpendByPerson(req.householdId, 4, year),
     monthlyTrend,
     balance: await computeBalance(req.householdId),
     goals: await getGoalsSummary(req.householdId),
@@ -179,6 +193,7 @@ router.get('/', async (req, res) => {
     totalSpent: Math.round(totalSpent * 100) / 100,
     totalBudget: Math.round(totalBudget * 100) / 100,
     spendByCategory,
+    spendByPerson: await getSpendByPerson(req.householdId, 7, month),
     recentExpenses: recentExpensesResult.rows,
     balance: await computeBalance(req.householdId),
     upcomingBills,

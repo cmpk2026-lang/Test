@@ -15,7 +15,7 @@ import {
 import { api } from '../api/client';
 import { useMonth } from '../context/MonthContext';
 import { useAuth } from '../context/AuthContext';
-import type { Balance, CategorySpend, DashboardData, GoalSummary, YearDashboardData } from '../types';
+import type { Balance, CategorySpend, DashboardData, GoalSummary, PersonSpend, YearDashboardData } from '../types';
 import { formatMoney } from '../utils';
 
 type ViewMode = 'month' | 'year';
@@ -103,7 +103,10 @@ export function DashboardPage() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <CategoryBreakdownCard spendByCategory={data.spendByCategory} periodLabel={periodLabel} />
-        <BalanceCard balance={data.balance} memberName={memberName} />
+        <div className="space-y-4">
+          <BalanceCard balance={data.balance} memberName={memberName} />
+          <SpendByPersonCard spendByPerson={data.spendByPerson} periodLabel={periodLabel} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -288,6 +291,40 @@ function BalanceCard({ balance, memberName }: { balance: Balance; memberName: (i
           "You're all settled up 🎉"
         )}
       </div>
+    </div>
+  );
+}
+
+function SpendByPersonCard({ spendByPerson, periodLabel }: { spendByPerson: PersonSpend[]; periodLabel: string }) {
+  const total = spendByPerson.reduce((s, p) => s + p.spent, 0);
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+      <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        Spending by person
+      </h2>
+      {total === 0 ? (
+        <p className="text-sm text-slate-400">No expenses logged {periodLabel} yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {spendByPerson.map((p) => {
+            const pct = total > 0 ? Math.round((p.spent / total) * 100) : 0;
+            return (
+              <div key={p.userId}>
+                <div className="mb-1 flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: p.color }} />
+                    {p.name}
+                  </span>
+                  <span className="font-medium text-slate-800 dark:text-slate-100">{formatMoney(p.spent)}</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                  <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: p.color }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
