@@ -53,6 +53,37 @@ async function computeBalance(householdId) {
   return { members: net, settlement: summary };
 }
 
+async function getTotalSpent(householdId, datePrefixLength, period) {
+  const result = await pool.query(
+    `SELECT COALESCE(SUM(amount), 0) AS total FROM expenses
+     WHERE household_id = $1 AND substr(date, 1, $2) = $3`,
+    [householdId, datePrefixLength, period]
+  );
+  return Math.round(Number(result.rows[0].total) * 100) / 100;
+}
+
+// Expenses left without a category (e.g. the "No category" option in the
+// expense form) never match the `e.category_id = c.id` join used to build
+// spendByCategory, so they'd otherwise vanish from both the total and the
+// breakdown. Surface them as their own bucket instead of losing them.
+async function getUncategorizedSpend(householdId, datePrefixLength, period) {
+  const result = await pool.query(
+    `SELECT COALESCE(SUM(amount), 0) AS total FROM expenses
+     WHERE household_id = $1 AND substr(date, 1, $2) = $3 AND category_id IS NULL`,
+    [householdId, datePrefixLength, period]
+  );
+  return Math.round(Number(result.rows[0].total) * 100) / 100;
+}
+
+function withUncategorizedBucket(spendByCategory, uncategorizedSpent) {
+  if (uncategorizedSpent <= 0) return spendByCategory;
+  const withBucket = [
+    ...spendByCategory,
+    { categoryId: null, name: 'Uncategorized', icon: '❔', color: '#94a3b8', spent: uncategorizedSpent, budget: 0 },
+  ];
+  return withBucket.sort((a, b) => b.spent - a.spent);
+}
+
 async function getSpendByPerson(householdId, datePrefixLength, period) {
   const result = await pool.query(
     `SELECT u.id AS "userId", u.name, u.color, COALESCE(SUM(e.amount), 0) AS spent
@@ -107,13 +138,12 @@ router.get('/year', async (req, res) => {
      ORDER BY spent DESC`,
     [year, req.householdId]
   );
-  const spendByCategory = spendByCategoryResult.rows.map((c) => ({
-    ...c,
-    spent: Number(c.spent),
-    budget: Number(c.budget),
-  }));
+  const spendByCategory = withUncategorizedBucket(
+    spendByCategoryResult.rows.map((c) => ({ ...c, spent: Number(c.spent), budget: Number(c.budget) })),
+    await getUncategorizedSpend(req.householdId, 4, year)
+  );
 
-  const totalSpent = spendByCategory.reduce((s, c) => s + c.spent, 0);
+  const totalSpent = await getTotalSpent(req.householdId, 4, year);
   const totalBudget = spendByCategory.reduce((s, c) => s + c.budget, 0);
 
   const monthlyResult = await pool.query(
@@ -155,13 +185,12 @@ router.get('/', async (req, res) => {
      ORDER BY spent DESC`,
     [month, req.householdId]
   );
-  const spendByCategory = spendByCategoryResult.rows.map((c) => ({
-    ...c,
-    spent: Number(c.spent),
-    budget: Number(c.budget),
-  }));
+  const spendByCategory = withUncategorizedBucket(
+    spendByCategoryResult.rows.map((c) => ({ ...c, spent: Number(c.spent), budget: Number(c.budget) })),
+    await getUncategorizedSpend(req.householdId, 7, month)
+  );
 
-  const totalSpent = spendByCategory.reduce((s, c) => s + c.spent, 0);
+  const totalSpent = await getTotalSpent(req.householdId, 7, month);
   const totalBudget = spendByCategory.reduce((s, c) => s + c.budget, 0);
 
   const recentExpensesResult = await pool.query(

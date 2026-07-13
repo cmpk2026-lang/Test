@@ -91,7 +91,7 @@ export interface Balance {
 }
 
 export interface CategorySpend {
-  categoryId: number;
+  categoryId: number | null;
   name: string;
   icon: string;
   color: string;

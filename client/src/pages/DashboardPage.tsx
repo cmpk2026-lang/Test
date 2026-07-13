@@ -236,7 +236,7 @@ function CategoryBreakdownCard({
               <PieChart>
                 <Pie data={pieData} dataKey="spent" nameKey="name" innerRadius={55} outerRadius={85} paddingAngle={2}>
                   {pieData.map((c) => (
-                    <Cell key={c.categoryId} fill={c.color} />
+                    <Cell key={c.categoryId ?? 'uncategorized'} fill={c.color} />
                   ))}
                 </Pie>
                 <Tooltip formatter={(v) => formatMoney(Number(v))} />
@@ -245,7 +245,7 @@ function CategoryBreakdownCard({
           </div>
           <ul className="w-full space-y-2">
             {pieData.map((c) => (
-              <li key={c.categoryId} className="flex items-center justify-between text-sm">
+              <li key={c.categoryId ?? 'uncategorized'} className="flex items-center justify-between text-sm">
                 <span className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                   <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: c.color }} />
                   {c.icon} {c.name}
